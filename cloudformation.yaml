@@ -2,33 +2,51 @@ AWSTemplateFormatVersion: "2010-09-09"
 Parameters:
   VpcBlock:
     Type: String
-    Default: 10.0.0.0/16
+    Default: 10.0.0.0/21
     Description: The CIDR range for the VPC. This should be a valid private (RFC 1918) CIDR range.
-  PublicSubnet01Block:
+  IpCount:
+    Type: Number
+    Default: 9
+    Description: The number of CIDRs to generate. Valid range is between 1 and 256.
+  CidrBits:
+    Type: Number
+    Default: 7
+    Description: The number of subnet bits for the CIDR. For example, specifying a value "8" for this parameter will create a CIDR with a mask of "/24".
+  DBInstanceClass:
+    Default: db.m5.large
+    Description: DB instance class
     Type: String
-    Default: 10.0.0.0/24
-    Description: CidrBlock for public subnet 01 within the VPC
-  PublicSubnet02Block:
+    ConstraintDescription: Must select a valid DB instance type.
+  DBAllocatedStorage:
+    Default: '50'
+    Description: The size of the database (GiB)
+    Type: Number
+    MinValue: '20'
+    MaxValue: '65536'
+    ConstraintDescription: must be between 20 and 65536 GiB.
+  DBUsername:
+    NoEcho: 'true'
+    Description: Username for MySQL database access
+    Default: 'atc'
     Type: String
-    Default: 10.0.1.0/24
-    Description: CidrBlock for public subnet 02 within the VPC
-  PublicSubnet03Block:
+    MinLength: '1'
+    MaxLength: '16'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+  DBPassword:
+    NoEcho: 'true'
+    Description: Password MySQL database access
+    Default: 'atc123456'
     Type: String
-    Default: 10.0.2.0/24
-    Description: CidrBlock for public subnet 03 within the VPC
-  PrivateSubnet01Block:
+    MinLength: '8'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters.
+  EnableRDS:
+    Default: true
+    Description: Enable in order to deploy RDS Instance
     Type: String
-    Default: 10.0.3.0/24
-    Description: CidrBlock for private subnet 01 within the VPC
-  PrivateSubnet02Block:
-    Type: String
-    Default: 10.0.4.0/24
-    Description: CidrBlock for private subnet 02 within the VPC
-  PrivateSubnet03Block:
-    Type: String
-    Default: 10.0.5.0/24
-    Description: CidrBlock for private subnet 03 within the VPC
-    
+    AllowedValues: [true, false]
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -37,12 +55,17 @@ Metadata:
          default: "Worker Network Configuration"
         Parameters:
           - VpcBlock
-          - PublicSubnet01Block
-          - PublicSubnet02Block
-          - PublicSubnet03Block
-          - PrivateSubnet01Block
-          - PrivateSubnet02Block
-          - PrivateSubnet03Block
+          - EnableRDS
+          - IpCount
+          - CidrBits
+          - DBPassword
+          - DBUsername
+          - DBAllocatedStorage
+          - DBInstanceClass
+          - DBName
+Conditions:
+  ShouldCreateRDS:
+    !Equals [true, !Ref EnableRDS]
 
 Resources:
   VPC:
@@ -87,7 +110,14 @@ Resources:
       Tags:
       - Key: Name
         Value: !Sub "${AWS::StackName}-private-RT"
-    
+
+  DatabaseRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-Database-RT"
     
   NatGatewayEIP:
     DependsOn:
@@ -99,7 +129,6 @@ Resources:
       - Key: Name
         Value: !Sub "${AWS::StackName}-eip"
       
-  
   PublicRoute:
     DependsOn: VPCGatewayAttachment
     Type: AWS::EC2::Route
@@ -116,6 +145,15 @@ Resources:
       RouteTableId: !Ref PrivateRouteTable
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId: !Ref NatGateway
+    
+  DatabaseRoute:
+    DependsOn:
+      - NatGateway
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref DatabaseRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
 
   NatGateway:
     DependsOn:
@@ -128,6 +166,8 @@ Resources:
       - Key: Name
         Value: !Sub "${AWS::StackName}-natgwz"
 
+  # Public Subnets
+
   PublicSubnet01:
     Type: AWS::EC2::Subnet
     Metadata:
@@ -136,13 +176,12 @@ Resources:
       AvailabilityZone: !Select 
         - 0
         - Fn::GetAZs: !Ref 'AWS::Region'
-      CidrBlock:
-        Ref: PublicSubnet01Block
+      CidrBlock: !Select [ 0, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
       VpcId:
         Ref: VPC
       Tags: 
       - Key: Name
-        Value: !Sub "${AWS::StackName}-PublicSubnet01"
+        Value: !Sub "${AWS::StackName}-publicsubnet01"
   
   PublicSubnet02:
     Type: AWS::EC2::Subnet
@@ -152,13 +191,12 @@ Resources:
       AvailabilityZone: !Select 
         - 1
         - Fn::GetAZs: !Ref 'AWS::Region'
-      CidrBlock:
-        Ref: PublicSubnet02Block
+      CidrBlock: !Select [ 1, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
       VpcId:
         Ref: VPC
       Tags: 
       - Key: Name
-        Value: !Sub "${AWS::StackName}-PublicSubnet02"
+        Value: !Sub "${AWS::StackName}-publicsubnet02"
 
   PublicSubnet03:
     Type: AWS::EC2::Subnet
@@ -168,14 +206,14 @@ Resources:
       AvailabilityZone: !Select 
         - 2
         - Fn::GetAZs: !Ref 'AWS::Region'
-      CidrBlock:
-        Ref: PublicSubnet03Block
+      CidrBlock: !Select [ 2, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
       VpcId:
         Ref: VPC
       Tags: 
       - Key: Name
-        Value: !Sub "${AWS::StackName}-PublicSubnet03"
+        Value: !Sub "${AWS::StackName}-publicsubnet03"
   
+  # Private Subnets
   PrivateSubnet01:
     Type: AWS::EC2::Subnet
     Metadata:
@@ -184,8 +222,7 @@ Resources:
       AvailabilityZone: !Select 
         - 0
         - Fn::GetAZs: !Ref 'AWS::Region'
-      CidrBlock:
-        Ref: PrivateSubnet01Block
+      CidrBlock: !Select [ 3, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
       VpcId:
         Ref: VPC
       Tags:
@@ -202,13 +239,12 @@ Resources:
       AvailabilityZone: !Select 
         - 1
         - Fn::GetAZs: !Ref 'AWS::Region'
-      CidrBlock:
-        Ref: PrivateSubnet02Block
+      CidrBlock: !Select [ 4, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
       VpcId:
         Ref: VPC
       Tags:
       - Key: Name
-        Value: !Sub "${AWS::StackName}-PrivateSubnet02"
+        Value: !Sub "${AWS::StackName}-privatesubnet02"
       - Key: "kubernetes.io/role/internal-elb"
         Value: 1
   
@@ -220,16 +256,66 @@ Resources:
       AvailabilityZone: !Select 
         - 2
         - Fn::GetAZs: !Ref 'AWS::Region'
-      CidrBlock:
-        Ref: PrivateSubnet03Block
+      CidrBlock: !Select [ 5, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
       VpcId:
         Ref: VPC
       Tags:
       - Key: Name
-        Value: !Sub "${AWS::StackName}-PrivateSubnet03"
+        Value: !Sub "${AWS::StackName}-privatesubnet03"
       - Key: "kubernetes.io/role/internal-elb"
         Value: 1
+
+  # Database Subnets
+  DBSubnet01:
+    Type: AWS::EC2::Subnet
+    Condition: ShouldCreateRDS
+    Metadata:
+      Comment: DB Subnet 01
+    Properties:
+      AvailabilityZone: !Select 
+        - 0
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock: !Select [ 6, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
+      VpcId:
+        Ref: VPC
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-dbsubnet01"
   
+  DBSubnet02:
+    Type: AWS::EC2::Subnet
+    Condition: ShouldCreateRDS
+    Metadata:
+      Comment: DB Subnet 02
+    Properties:
+      AvailabilityZone: !Select 
+        - 1
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock: !Select [ 7, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
+      VpcId:
+        Ref: VPC
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-dbsubnet02"
+  
+  DBSubnet03:
+    Type: AWS::EC2::Subnet
+    Condition: ShouldCreateRDS
+    Metadata:
+      Comment: DB Subnet 03
+    Properties:
+      AvailabilityZone: !Select 
+        - 2
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock: !Select [ 8, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
+      VpcId:
+        Ref: VPC
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}-dbsubnet03"
+  
+  # Route TableAssociation
+
   PublicSubnet01RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -266,6 +352,25 @@ Resources:
       SubnetId: !Ref PrivateSubnet03
       RouteTableId: !Ref PrivateRouteTable
 
+  Database01RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DBSubnet01
+      RouteTableId: !Ref DatabaseRouteTable
+
+  Database02RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DBSubnet02
+      RouteTableId: !Ref DatabaseRouteTable
+
+  Database03RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DBSubnet03
+      RouteTableId: !Ref DatabaseRouteTable
+
+ # Security Groups
   ClusterControlPlaneSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -275,7 +380,7 @@ Resources:
         - Key: !Sub kubernetes.io/cluster/${AWS::StackName}-cluster
           Value: owned
         - Key: Name
-          Value: !Sub "${AWS::StackName}-EksSG"
+          Value: !Sub "${AWS::StackName}-eks-sg"
 
   NodeSecurityGroup:
     Type: "AWS::EC2::SecurityGroup"
@@ -285,9 +390,10 @@ Resources:
         - Key: !Sub kubernetes.io/cluster/${AWS::StackName}-cluster
           Value: owned
         - Key: Name
-          Value: !Sub "${AWS::StackName}-NodeGroupSG"
+          Value: !Sub "${AWS::StackName}-node-sg"
       VpcId: !Ref VPC
 
+  # Security Groups Rules
   NodeSecurityGroupIngress:
     Type: "AWS::EC2::SecurityGroupIngress"
     DependsOn: NodeSecurityGroup
@@ -354,6 +460,39 @@ Resources:
       SourceSecurityGroupId: !Ref ClusterControlPlaneSecurityGroup
       ToPort: 443
 
+  # Create RDS
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Condition: ShouldCreateRDS
+    Properties: 
+      DBSubnetGroupName: !Sub "${AWS::StackName}-DBSubnetGroup"
+      DBSubnetGroupDescription: Database Subnet Group for RDS
+      SubnetIds: 
+        - !Ref DBSubnet01
+        - !Ref DBSubnet02
+        - !Ref DBSubnet03
+    DependsOn: 
+      [DBSubnet01, DBSubnet02, DBSubnet03]
+
+  RDSDatabase:
+    Type: 'AWS::RDS::DBInstance'
+    Condition: ShouldCreateRDS
+    Properties:
+      DBInstanceIdentifier: !Sub "${AWS::StackName}-DBInstance"
+      DBName: !Sub "${AWS::StackName}"
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBAllocatedStorage
+      MultiAZ: true
+      Engine: postgres
+      EngineVersion: 13.5
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+    DependsOn: 
+      [DBSubnetGroup]
+
+  # Create Kubernetes and NodeGroup
+
   EKSCluster:
     Type: AWS::EKS::Cluster
     Properties:
@@ -377,7 +516,7 @@ Resources:
     Properties:
       ClusterName: !Sub "${AWS::StackName}-cluster"
       NodeRole: "arn:aws:iam::735968160530:role/AWS-Nodes-Role"
-      DiskSize: '50'
+      DiskSize: '75'
       ScalingConfig:
         MinSize: 2
         DesiredSize: 2
@@ -388,7 +527,6 @@ Resources:
         - !Ref PrivateSubnet03
     DependsOn:
       [ EKSCluster, NodeSecurityGroup]
-
 
 Outputs:
   SubnetIds:
@@ -403,6 +541,9 @@ Outputs:
           !Ref PrivateSubnet01,
           !Ref PrivateSubnet02,
           !Ref PrivateSubnet03,
+          !Ref DBSubnet01,
+          !Ref DBSubnet02,
+          !Ref DBSubnet03,
         ],
       ]
   SecurityGroups:
