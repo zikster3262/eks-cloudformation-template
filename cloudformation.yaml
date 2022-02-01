@@ -47,6 +47,10 @@ Parameters:
     Description: Enable in order to deploy RDS Instance
     Type: String
     AllowedValues: [true, false]
+  ClusterNodesNumber:
+    Type: Number
+    Default: 2
+    Description: Cluster Node Group size
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -55,6 +59,7 @@ Metadata:
          default: "Worker Network Configuration"
         Parameters:
           - VpcBlock
+          - ClusterNodesNumber
           - EnableRDS
           - IpCount
           - CidrBits
@@ -113,6 +118,7 @@ Resources:
 
   DatabaseRouteTable:
     Type: AWS::EC2::RouteTable
+    Condition: ShouldCreateRDS
     Properties:
       VpcId: !Ref VPC
       Tags:
@@ -150,6 +156,7 @@ Resources:
     DependsOn:
       - NatGateway
     Type: AWS::EC2::Route
+    Condition: ShouldCreateRDS
     Properties:
       RouteTableId: !Ref DatabaseRouteTable
       DestinationCidrBlock: 0.0.0.0/0
@@ -354,18 +361,21 @@ Resources:
 
   Database01RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: ShouldCreateRDS
     Properties:
       SubnetId: !Ref DBSubnet01
       RouteTableId: !Ref DatabaseRouteTable
 
   Database02RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: ShouldCreateRDS
     Properties:
       SubnetId: !Ref DBSubnet02
       RouteTableId: !Ref DatabaseRouteTable
 
   Database03RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: ShouldCreateRDS
     Properties:
       SubnetId: !Ref DBSubnet03
       RouteTableId: !Ref DatabaseRouteTable
@@ -508,6 +518,12 @@ Resources:
         EndpointPrivateAccess: true
         EndpointPublicAccess: true
         PublicAccessCidrs: [ "0.0.0.0/0" ]
+        Version: "1.20"
+      Logging:
+        ClusterLogging:
+          EnabledTypes:
+            - Type: api
+            - Type: audit
     DependsOn:
       [ PrivateSubnet01, PrivateSubnet02, PrivateSubnet03, ClusterControlPlaneSecurityGroup]
   
@@ -518,15 +534,29 @@ Resources:
       NodeRole: "arn:aws:iam::735968160530:role/AWS-Nodes-Role"
       DiskSize: '75'
       ScalingConfig:
-        MinSize: 2
-        DesiredSize: 2
-        MaxSize: 2
+        MinSize: 1
+        DesiredSize: !Ref ClusterNodesNumber
+        MaxSize: !Ref ClusterNodesNumber
       Subnets:
         - !Ref PrivateSubnet01
         - !Ref PrivateSubnet02
         - !Ref PrivateSubnet03
     DependsOn:
       [ EKSCluster, NodeSecurityGroup]
+
+  # Helm:
+  #   Type: "AWSQS::Kubernetes::Helm"
+  #   Properties:
+  #     ClusterID: !Ref EKSCluster
+  #     Namespace: "default"
+  #     Chart: stable/wordpress
+  #     Name: "test"
+  #     Values:
+  #       wordpressUsername: "test"
+  #       wordpressPassword: "test"
+  #   DependsOn:
+  #     [ EKSCluster, NodeSecurityGroup,EKSNodegroup]
+
 
 Outputs:
   SubnetIds:
@@ -541,9 +571,6 @@ Outputs:
           !Ref PrivateSubnet01,
           !Ref PrivateSubnet02,
           !Ref PrivateSubnet03,
-          !Ref DBSubnet01,
-          !Ref DBSubnet02,
-          !Ref DBSubnet03,
         ],
       ]
   SecurityGroups:
