@@ -518,7 +518,7 @@ Resources:
         EndpointPrivateAccess: true
         EndpointPublicAccess: true
         PublicAccessCidrs: [ "0.0.0.0/0" ]
-        Version: "1.20"
+      Version: "1.20"
       Logging:
         ClusterLogging:
           EnabledTypes:
@@ -543,20 +543,6 @@ Resources:
         - !Ref PrivateSubnet03
     DependsOn:
       [ EKSCluster, NodeSecurityGroup]
-
-  # Helm:
-  #   Type: "AWSQS::Kubernetes::Helm"
-  #   Properties:
-  #     ClusterID: !Ref EKSCluster
-  #     Namespace: "default"
-  #     Chart: stable/wordpress
-  #     Name: "test"
-  #     Values:
-  #       wordpressUsername: "test"
-  #       wordpressPassword: "test"
-  #   DependsOn:
-  #     [ EKSCluster, NodeSecurityGroup,EKSNodegroup]
-
 
 Outputs:
   SubnetIds:
