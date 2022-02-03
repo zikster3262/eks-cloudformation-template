@@ -488,7 +488,6 @@ Resources:
     Type: 'AWS::RDS::DBInstance'
     Condition: ShouldCreateRDS
     Properties:
-      DBInstanceIdentifier: !Sub "${AWS::StackName}-DBInstance"
       DBName: !Sub "${AWS::StackName}"
       DBSubnetGroupName: !Ref DBSubnetGroup
       DBInstanceClass: !Ref DBInstanceClass
@@ -543,20 +542,6 @@ Resources:
         - !Ref PrivateSubnet03
     DependsOn:
       [ EKSCluster, NodeSecurityGroup]
-
-  # Helm:
-  #   Type: "AWSQS::Kubernetes::Helm"
-  #   Properties:
-  #     ClusterID: !Ref EKSCluster
-  #     Namespace: "default"
-  #     Chart: stable/wordpress
-  #     Name: "test"
-  #     Values:
-  #       wordpressUsername: "test"
-  #       wordpressPassword: "test"
-  #   DependsOn:
-  #     [ EKSCluster, NodeSecurityGroup,EKSNodegroup]
-
 
 Outputs:
   SubnetIds:
