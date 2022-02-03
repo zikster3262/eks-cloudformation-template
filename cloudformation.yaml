@@ -517,7 +517,7 @@ Resources:
         EndpointPrivateAccess: true
         EndpointPublicAccess: true
         PublicAccessCidrs: [ "0.0.0.0/0" ]
-        Version: "1.20"
+      Version: "1.20"
       Logging:
         ClusterLogging:
           EnabledTypes:
