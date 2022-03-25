@@ -43,14 +43,21 @@ Parameters:
     AllowedPattern: '[a-zA-Z0-9]*'
     ConstraintDescription: must contain only alphanumeric characters.
   EnableRDS:
-    Default: true
+    Default: false
     Description: Enable in order to deploy RDS Instance
     Type: String
     AllowedValues: [true, false]
   ClusterNodesNumber:
-    Type: String
-    Default: "2"
+    Type: Number
+    Default: '2'
     Description: Cluster Node Group size
+  ImageURL:
+    Type: String
+    Default: "735968160530.dkr.ecr.eu-central-1.amazonaws.com/kubequeuereader:v1.0.0"
+  SQSQueu:
+    Type: String
+    Default: "arn:aws:sqs:eu-central-1:735968160530:kubeQueue"
+
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -174,7 +181,6 @@ Resources:
         Value: !Sub "${AWS::StackName}-natgwz"
 
   # Public Subnets
-
   PublicSubnet01:
     Type: AWS::EC2::Subnet
     Metadata:
@@ -543,6 +549,36 @@ Resources:
     DependsOn:
       [ EKSCluster, NodeSecurityGroup]
 
+  EKSLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-lambda'
+      Role: "arn:aws:iam::735968160530:role/test-sqs"
+      PackageType: Image
+      Code:
+        ImageUri: !Ref ImageURL
+      Timeout: 300
+      TracingConfig:
+        Mode: Active
+      Environment:
+        Variables:
+          ClusterID: !GetAtt 'EKSCluster.Arn'
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref ClusterControlPlaneSecurityGroup
+        SubnetIds:
+        - !Ref PrivateSubnet01
+        - !Ref PrivateSubnet02
+        - !Ref PrivateSubnet03
+    DependsOn: [EKSCluster, EKSNodegroup]
+
+  LambdaSubscription:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-lambda'
+      EventSourceArn: !Ref SQSQueu
+    DependsOn: [EKSCluster, EKSNodegroup, EKSLambda]
+
 Outputs:
   SubnetIds:
     Description: Subnets IDs in the VPC
@@ -558,9 +594,12 @@ Outputs:
           !Ref PrivateSubnet03,
         ],
       ]
-  SecurityGroups:
+  SecurityGroupsEKS:
     Description: Security group for the cluster control plane communication with worker nodes
-    Value: !Join [" , ", [!Ref  ClusterControlPlaneSecurityGroup, !Ref NodeSecurityGroup]]
+    Value: !Ref ClusterControlPlaneSecurityGroup
+  SecurityGroupsNodes:
+    Description: Security group for worker nodes
+    Value: !Ref NodeSecurityGroup
   VpcId:
     Description: Virtual Private Cloud ID
     Value: !Ref VPC
