@@ -18,7 +18,7 @@ Parameters:
     Type: String
     ConstraintDescription: Must select a valid DB instance type.
   DBAllocatedStorage:
-    Default: '50'
+    Default: '1024'
     Description: The size of the database (GiB)
     Type: Number
     MinValue: '20'
@@ -42,32 +42,43 @@ Parameters:
     MaxLength: '41'
     AllowedPattern: '[a-zA-Z0-9]*'
     ConstraintDescription: must contain only alphanumeric characters.
-  EnableRDS:
-    Default: false
-    Description: Enable in order to deploy RDS Instance
-    Type: String
-    AllowedValues: [true, false]
+  DBVersion:
+     Type: String
+    Default: 13.5
+    Description:  latest AWS Aurora version supported.
   ClusterNodesNumber:
     Type: Number
-    Default: '2'
+    Default: '3'
     Description: Cluster Node Group size
-  ImageURL:
+  ClusterNodesType:
     Type: String
-    Default: "735968160530.dkr.ecr.eu-central-1.amazonaws.com/kubequeuereader:v1.0.0"
-  SQSQueu:
+    Default: 'm5.large'
+    Description: Cluster Node Group Type
+  ClusterVersion:
     Type: String
-    Default: "arn:aws:sqs:eu-central-1:735968160530:kubeQueue"
+    Default: 1.21
+    Description:  choose AWS EKS cluster version.
+  ClusterNodeStorage:
+    Default: '100'
+    Description: The size of the database (GiB)
+    Type: Number
+    MinValue: '20'
+    MaxValue: '65536'
+    ConstraintDescription: must be between 20 and 65536 GiB.
+
 
 
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-         default: "Worker Network Configuration"
+         default: "Environment Configuration"
         Parameters:
           - VpcBlock
           - ClusterNodesNumber
-          - EnableRDS
+          - ClusterNodesType
+          - ClusterVersion
+          - ClusterNodeStorage
           - IpCount
           - CidrBits
           - DBPassword
@@ -75,9 +86,8 @@ Metadata:
           - DBAllocatedStorage
           - DBInstanceClass
           - DBName
-Conditions:
-  ShouldCreateRDS:
-    !Equals [true, !Ref EnableRDS]
+          - DBVersion
+
 
 Resources:
   VPC:
@@ -482,7 +492,7 @@ Resources:
     Condition: ShouldCreateRDS
     Properties: 
       DBSubnetGroupName: !Sub "${AWS::StackName}-DBSubnetGroup"
-      DBSubnetGroupDescription: Database Subnet Group for RDS
+      DBSubnetGroupDescription: Database Subnet Group for Aurora Database
       SubnetIds: 
         - !Ref DBSubnet01
         - !Ref DBSubnet02
@@ -490,7 +500,7 @@ Resources:
     DependsOn: 
       [DBSubnet01, DBSubnet02, DBSubnet03]
 
-  RDSDatabase:
+  AuroraDatabase:
     Type: 'AWS::RDS::DBInstance'
     Condition: ShouldCreateRDS
     Properties:
@@ -499,20 +509,53 @@ Resources:
       DBInstanceClass: !Ref DBInstanceClass
       AllocatedStorage: !Ref DBAllocatedStorage
       MultiAZ: true
-      Engine: postgres
-      EngineVersion: 13.5
+      Engine: aurora-postgresql
+      EngineVersion: !Ref DBVersion
       MasterUsername: !Ref DBUsername
       MasterUserPassword: !Ref DBPassword
     DependsOn: 
       [DBSubnetGroup]
 
-  # Create Kubernetes and NodeGroup
+  # AWS EKS Roles and Profiles
+  EKSIAMRole:
+  Type: 'AWS::IAM::Role'
+  Properties:
+    AssumeRolePolicyDocument:
+      Version: 2012-10-17
+      Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+              - eks.amazonaws.com
+          Action:
+            - 'sts:AssumeRole'
+    ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+      - arn:aws:iam::aws:policy/AmazonEKSServicePolicy
 
+  AmazonEKSNodeRole:
+  Type: 'AWS::IAM::Role'
+  Properties:
+    AssumeRolePolicyDocument:
+      Version: 2012-10-17
+      Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+              - ec2.amazonaws.com
+          Action:
+            - 'sts:AssumeRole'
+    ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+      - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+      - arn:aws:iam::aws:policy/AmazonEKSServicePolicy
+
+  # Create Kubernetes and NodeGroup
   EKSCluster:
     Type: AWS::EKS::Cluster
     Properties:
       Name: !Sub "${AWS::StackName}-cluster"
-      RoleArn: "arn:aws:iam::735968160530:role/Management-EKS"
+      RoleArn: !GetAtt EKSIAMRole
       ResourcesVpcConfig:
         SecurityGroupIds:
           - !Ref ClusterControlPlaneSecurityGroup
@@ -523,21 +566,23 @@ Resources:
         EndpointPrivateAccess: true
         EndpointPublicAccess: true
         PublicAccessCidrs: [ "0.0.0.0/0" ]
-      Version: "1.21"
+      Version: !Ref ClusterVersion
       Logging:
         ClusterLogging:
           EnabledTypes:
             - Type: api
             - Type: audit
     DependsOn:
-      [ PrivateSubnet01, PrivateSubnet02, PrivateSubnet03, ClusterControlPlaneSecurityGroup]
+      [ PrivateSubnet01, PrivateSubnet02, PrivateSubnet03, ClusterControlPlaneSecurityGroup, EKSIAMRole, AmazonEKSNodeRole]
   
   EKSNodegroup:
     Type: "AWS::EKS::Nodegroup"
     Properties:
-      ClusterName: !Sub "${AWS::StackName}-cluster"
-      NodeRole: "arn:aws:iam::735968160530:role/AWS-Nodes-Role"
-      DiskSize: '75'
+      ClusterName: !Sub "${AWS::StackName}-cluster-ng"
+      NodeRole: !GetAtt AmazonEKSNodeRole
+      DiskSize: !Ref ClusterNodeStorage
+      InstanceTypes:
+      - !Ref ClusterNodesType
       ScalingConfig:
         MinSize: 1
         DesiredSize: !Ref ClusterNodesNumber
@@ -547,37 +592,8 @@ Resources:
         - !Ref PrivateSubnet02
         - !Ref PrivateSubnet03
     DependsOn:
-      [ EKSCluster, NodeSecurityGroup]
+      [ EKSCluster, NodeSecurityGroup, EKSIAMRole, AmazonEKSNodeRole]
 
-  EKSLambda:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: !Sub '${AWS::StackName}-lambda'
-      Role: "arn:aws:iam::735968160530:role/test-sqs"
-      PackageType: Image
-      Code:
-        ImageUri: !Ref ImageURL
-      Timeout: 300
-      TracingConfig:
-        Mode: Active
-      Environment:
-        Variables:
-          ClusterID: !GetAtt 'EKSCluster.Arn'
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref ClusterControlPlaneSecurityGroup
-        SubnetIds:
-        - !Ref PrivateSubnet01
-        - !Ref PrivateSubnet02
-        - !Ref PrivateSubnet03
-    DependsOn: [EKSCluster, EKSNodegroup]
-
-  LambdaSubscription:
-    Type: AWS::Lambda::EventSourceMapping
-    Properties:
-      FunctionName: !Sub '${AWS::StackName}-lambda'
-      EventSourceArn: !Ref SQSQueu
-    DependsOn: [EKSCluster, EKSNodegroup, EKSLambda]
 
 Outputs:
   SubnetIds:
