@@ -18,37 +18,19 @@ Parameters:
     Type: String
     ConstraintDescription: Must select a valid DB instance type.
   DBAllocatedStorage:
-    Default: '1024'
+    Default: '100'
     Description: The size of the database (GiB)
     Type: Number
     MinValue: '20'
     MaxValue: '65536'
     ConstraintDescription: must be between 20 and 65536 GiB.
-  DBUsername:
-    NoEcho: 'true'
-    Description: Username for MySQL database access
-    Default: 'atc'
-    Type: String
-    MinLength: '1'
-    MaxLength: '16'
-    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
-    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
-  DBPassword:
-    NoEcho: 'true'
-    Description: Password MySQL database access
-    Default: 'atc123456'
-    Type: String
-    MinLength: '8'
-    MaxLength: '41'
-    AllowedPattern: '[a-zA-Z0-9]*'
-    ConstraintDescription: must contain only alphanumeric characters.
   DBVersion:
-     Type: String
+    Type: String
     Default: 13.5
     Description:  latest AWS Aurora version supported.
   ClusterNodesNumber:
     Type: Number
-    Default: '3'
+    Default: 3
     Description: Cluster Node Group size
   ClusterNodesType:
     Type: String
@@ -59,14 +41,12 @@ Parameters:
     Default: 1.21
     Description:  choose AWS EKS cluster version.
   ClusterNodeStorage:
-    Default: '100'
+    Default: 100
     Description: The size of the database (GiB)
     Type: Number
     MinValue: '20'
     MaxValue: '65536'
     ConstraintDescription: must be between 20 and 65536 GiB.
-
-
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -135,7 +115,6 @@ Resources:
 
   DatabaseRouteTable:
     Type: AWS::EC2::RouteTable
-    Condition: ShouldCreateRDS
     Properties:
       VpcId: !Ref VPC
       Tags:
@@ -173,7 +152,6 @@ Resources:
     DependsOn:
       - NatGateway
     Type: AWS::EC2::Route
-    Condition: ShouldCreateRDS
     Properties:
       RouteTableId: !Ref DatabaseRouteTable
       DestinationCidrBlock: 0.0.0.0/0
@@ -291,7 +269,6 @@ Resources:
   # Database Subnets
   DBSubnet01:
     Type: AWS::EC2::Subnet
-    Condition: ShouldCreateRDS
     Metadata:
       Comment: DB Subnet 01
     Properties:
@@ -307,7 +284,6 @@ Resources:
   
   DBSubnet02:
     Type: AWS::EC2::Subnet
-    Condition: ShouldCreateRDS
     Metadata:
       Comment: DB Subnet 02
     Properties:
@@ -323,7 +299,6 @@ Resources:
   
   DBSubnet03:
     Type: AWS::EC2::Subnet
-    Condition: ShouldCreateRDS
     Metadata:
       Comment: DB Subnet 03
     Properties:
@@ -377,21 +352,18 @@ Resources:
 
   Database01RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Condition: ShouldCreateRDS
     Properties:
       SubnetId: !Ref DBSubnet01
       RouteTableId: !Ref DatabaseRouteTable
 
   Database02RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Condition: ShouldCreateRDS
     Properties:
       SubnetId: !Ref DBSubnet02
       RouteTableId: !Ref DatabaseRouteTable
 
   Database03RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Condition: ShouldCreateRDS
     Properties:
       SubnetId: !Ref DBSubnet03
       RouteTableId: !Ref DatabaseRouteTable
@@ -486,10 +458,19 @@ Resources:
       SourceSecurityGroupId: !Ref ClusterControlPlaneSecurityGroup
       ToPort: 443
 
-  # Create RDS
+  # Create AWS RDS Aurora Database
+  SecretsManagerAdmin:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Description: AWS RDS admin credentials
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "atc"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\'
+
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
-    Condition: ShouldCreateRDS
     Properties: 
       DBSubnetGroupName: !Sub "${AWS::StackName}-DBSubnetGroup"
       DBSubnetGroupDescription: Database Subnet Group for Aurora Database
@@ -502,7 +483,6 @@ Resources:
 
   AuroraDatabase:
     Type: 'AWS::RDS::DBInstance'
-    Condition: ShouldCreateRDS
     Properties:
       DBName: !Sub "${AWS::StackName}"
       DBSubnetGroupName: !Ref DBSubnetGroup
@@ -511,51 +491,66 @@ Resources:
       MultiAZ: true
       Engine: aurora-postgresql
       EngineVersion: !Ref DBVersion
-      MasterUsername: !Ref DBUsername
-      MasterUserPassword: !Ref DBPassword
+      MasterUsername: !Sub '{{resolve:secretsmanager:${SecretsManagerAdmin}::username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${SecretsManagerAdmin}::password}}'
+      EnableCloudwatchLogsExports:
+        - postgresql
+      RestoreType: full-copy
+      StorageEncrypted: true
+      BackupRetentionPeriod: 30
     DependsOn: 
-      [DBSubnetGroup]
+      [DBSubnetGroup, DBSubnet01, DBSubnet02, DBSubnet03, NatGateway]
+
+  SecretRDSInstanceAttachment:
+    Type: 'AWS::SecretsManager::SecretTargetAttachment'
+    Properties:
+      SecretId: !Ref SecretsManagerAdmin
+      TargetId: !Ref AuroraDatabase
+      TargetType: 'AWS::RDS::DBInstance'
+    DependsOn:
+      [SecretsManagerAdmin, AuroraDatabase]
+
 
   # AWS EKS Roles and Profiles
   EKSIAMRole:
-  Type: 'AWS::IAM::Role'
-  Properties:
-    AssumeRolePolicyDocument:
-      Version: 2012-10-17
-      Statement:
-        - Effect: Allow
-          Principal:
-            Service:
-              - eks.amazonaws.com
-          Action:
-            - 'sts:AssumeRole'
-    ManagedPolicyArns:
-      - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
-      - arn:aws:iam::aws:policy/AmazonEKSServicePolicy
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - eks.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+        - arn:aws:iam::aws:policy/AmazonEKSServicePolicy
 
   AmazonEKSNodeRole:
-  Type: 'AWS::IAM::Role'
-  Properties:
-    AssumeRolePolicyDocument:
-      Version: 2012-10-17
-      Statement:
-        - Effect: Allow
-          Principal:
-            Service:
-              - ec2.amazonaws.com
-          Action:
-            - 'sts:AssumeRole'
-    ManagedPolicyArns:
-      - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
-      - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
-      - arn:aws:iam::aws:policy/AmazonEKSServicePolicy
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKSServicePolicy
 
   # Create Kubernetes and NodeGroup
   EKSCluster:
     Type: AWS::EKS::Cluster
     Properties:
       Name: !Sub "${AWS::StackName}-cluster"
-      RoleArn: !GetAtt EKSIAMRole
+      RoleArn: !GetAtt 'EKSIAMRole.Arn'
       ResourcesVpcConfig:
         SecurityGroupIds:
           - !Ref ClusterControlPlaneSecurityGroup
@@ -579,7 +574,8 @@ Resources:
     Type: "AWS::EKS::Nodegroup"
     Properties:
       ClusterName: !Sub "${AWS::StackName}-cluster-ng"
-      NodeRole: !GetAtt AmazonEKSNodeRole
+      NodeRole: !GetAtt 'AmazonEKSNodeRole.Arn'
+
       DiskSize: !Ref ClusterNodeStorage
       InstanceTypes:
       - !Ref ClusterNodesType
@@ -625,3 +621,6 @@ Outputs:
   NodeGroup:
     Description: EKS NodeGroup
     Value: !Ref EKSNodegroup
+  Password:
+    Description: Database Password
+    Value: !Sub '{{resolve:secretsmanager:${SecretsManagerAdmin}::password}}'
