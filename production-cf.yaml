@@ -20,6 +20,14 @@ Parameters:
     Type: String
     Default: 13.5
     Description:  latest AWS Aurora version supported.
+  DBPassword:
+    NoEcho: 'true'
+    Description: Password Aurora Postgres Database access
+    Type: String
+    MinLength: '8'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters.
   ClusterNodesNumber:
     Type: Number
     Default: 3
@@ -30,7 +38,7 @@ Parameters:
     Description: Cluster Node Group Type
   ClusterVersion:
     Type: String
-    Default: 1.21
+    Default: 1.22
     Description:  choose AWS EKS cluster version.
   ClusterNodeStorage:
     Default: 100
@@ -39,6 +47,14 @@ Parameters:
     MinValue: '20'
     MaxValue: '65536'
     ConstraintDescription: must be between 20 and 65536 GiB.
+  CoreDnsVersion:
+    Type: String
+    Default: v1.8.7-eksbuild.1
+    Description: AWS EKS CoreDNS Addon Version
+  KubeProxyVersion:
+    Type: String
+    Default: v1.22.6-eksbuild.1
+    Description: AWS EKS Kube Proxy Addon Version
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -447,7 +463,6 @@ Resources:
       ToPort: 443
 
   # Create AWS RDS Aurora Database
-
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties: 
@@ -466,7 +481,7 @@ Resources:
       Engine: aurora-postgresql
       EngineVersion: !Ref DBVersion
       MasterUsername: 'atc'
-      MasterUserPassword: 'atc12312312412'
+      MasterUserPassword: !Ref DBPassword
       BackupRetentionPeriod: 30
       PreferredBackupWindow: 01:00-02:00
       PreferredMaintenanceWindow: mon:03:00-mon:04:00
@@ -540,7 +555,33 @@ Resources:
             - Type: audit
     DependsOn:
       [ PrivateSubnet01, PrivateSubnet02, PrivateSubnet03, ClusterControlPlaneSecurityGroup, EKSIAMRole, AmazonEKSNodeRole]
+
+  EKSAddonCNI:
+    Type: AWS::EKS::Addon
+    Properties:
+      AddonName: vpc-cni
+      ClusterName: !Sub '${AWS::StackName}-cluster'
+    DependsOn:
+      [ EKSCluster, EKSNodegroup]
+
+  EKSAddonCoreDNS:
+    Type: AWS::EKS::Addon
+    Properties:
+      AddonName: coredns
+      AddonVersion: !Ref CoreDnsVersion
+      ClusterName: !Sub '${AWS::StackName}-cluster'
+      ResolveConflicts: OVERWRITE
+    DependsOn: [EKSCluster]
   
+  EKSAddonKubeProxy:
+    Type: AWS::EKS::Addon
+    Properties:
+      AddonName: kube-proxy
+      AddonVersion: !Ref KubeProxyVersion
+      ClusterName: !Sub '${AWS::StackName}-cluster'
+      ResolveConflicts: OVERWRITE
+    DependsOn: [EKSCluster]
+
   EKSNodegroup:
     Type: "AWS::EKS::Nodegroup"
     Properties:
@@ -557,6 +598,9 @@ Resources:
         - !Ref PrivateSubnet01
         - !Ref PrivateSubnet02
         - !Ref PrivateSubnet03
+      ForceUpdateEnabled: true
+      UpdateConfig:
+        MaxUnavailablePercentage: 50
     DependsOn:
       [ EKSCluster, NodeSecurityGroup, EKSIAMRole, AmazonEKSNodeRole]
 
