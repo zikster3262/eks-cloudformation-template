@@ -4,14 +4,6 @@ Parameters:
     Type: String
     Default: 10.0.0.0/21
     Description: The CIDR range for the VPC. This should be a valid private (RFC 1918) CIDR range.
-  IpCount:
-    Type: Number
-    Default: 9
-    Description: The number of CIDRs to generate. Valid range is between 1 and 256.
-  CidrBits:
-    Type: Number
-    Default: 7
-    Description: The number of subnet bits for the CIDR. For example, specifying a value "8" for this parameter will create a CIDR with a mask of "/24".
   DBInstanceClass:
     Default: db.m5.large
     Description: DB instance class
@@ -55,19 +47,16 @@ Metadata:
          default: "Environment Configuration"
         Parameters:
           - VpcBlock
-          - ClusterNodesNumber
-          - ClusterNodesType
-          - ClusterVersion
-          - ClusterNodeStorage
-          - IpCount
-          - CidrBits
           - DBPassword
           - DBUsername
           - DBAllocatedStorage
           - DBInstanceClass
           - DBName
           - DBVersion
-
+          - ClusterNodesNumber
+          - ClusterNodesType
+          - ClusterVersion
+          - ClusterNodeStorage
 
 Resources:
   VPC:
@@ -177,7 +166,7 @@ Resources:
       AvailabilityZone: !Select 
         - 0
         - Fn::GetAZs: !Ref 'AWS::Region'
-      CidrBlock: !Select [ 0, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
+      CidrBlock: !Select [ 0, !Cidr [ !Ref VpcBlock, 9 , 7 ] ]
       VpcId:
         Ref: VPC
       Tags: 
@@ -192,7 +181,7 @@ Resources:
       AvailabilityZone: !Select 
         - 1
         - Fn::GetAZs: !Ref 'AWS::Region'
-      CidrBlock: !Select [ 1, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
+      CidrBlock: !Select [ 1, !Cidr [ !Ref VpcBlock, 9 , 7 ] ]
       VpcId:
         Ref: VPC
       Tags: 
@@ -207,7 +196,7 @@ Resources:
       AvailabilityZone: !Select 
         - 2
         - Fn::GetAZs: !Ref 'AWS::Region'
-      CidrBlock: !Select [ 2, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
+      CidrBlock: !Select [ 2, !Cidr [ !Ref VpcBlock, 9 , 7 ] ]
       VpcId:
         Ref: VPC
       Tags: 
@@ -223,7 +212,7 @@ Resources:
       AvailabilityZone: !Select 
         - 0
         - Fn::GetAZs: !Ref 'AWS::Region'
-      CidrBlock: !Select [ 3, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
+      CidrBlock: !Select [ 3, !Cidr [ !Ref VpcBlock, 9 , 7 ] ]
       VpcId:
         Ref: VPC
       Tags:
@@ -240,7 +229,7 @@ Resources:
       AvailabilityZone: !Select 
         - 1
         - Fn::GetAZs: !Ref 'AWS::Region'
-      CidrBlock: !Select [ 4, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
+      CidrBlock: !Select [ 4, !Cidr [ !Ref VpcBlock, 9 , 7 ] ]
       VpcId:
         Ref: VPC
       Tags:
@@ -257,7 +246,7 @@ Resources:
       AvailabilityZone: !Select 
         - 2
         - Fn::GetAZs: !Ref 'AWS::Region'
-      CidrBlock: !Select [ 5, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
+      CidrBlock: !Select [ 5, !Cidr [ !Ref VpcBlock, 9 , 7 ] ]
       VpcId:
         Ref: VPC
       Tags:
@@ -275,7 +264,7 @@ Resources:
       AvailabilityZone: !Select 
         - 0
         - Fn::GetAZs: !Ref 'AWS::Region'
-      CidrBlock: !Select [ 6, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
+      CidrBlock: !Select [ 6, !Cidr [ !Ref VpcBlock, 9 , 7 ] ]
       VpcId:
         Ref: VPC
       Tags:
@@ -290,7 +279,7 @@ Resources:
       AvailabilityZone: !Select 
         - 1
         - Fn::GetAZs: !Ref 'AWS::Region'
-      CidrBlock: !Select [ 7, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
+      CidrBlock: !Select [ 7, !Cidr [ !Ref VpcBlock, 9 , 7 ] ]
       VpcId:
         Ref: VPC
       Tags:
@@ -305,7 +294,7 @@ Resources:
       AvailabilityZone: !Select 
         - 2
         - Fn::GetAZs: !Ref 'AWS::Region'
-      CidrBlock: !Select [ 8, !Cidr [ !Ref VpcBlock, !Ref IpCount , !Ref CidrBits ] ]
+      CidrBlock: !Select [ 8, !Cidr [ !Ref VpcBlock, 9 , 7 ] ]
       VpcId:
         Ref: VPC
       Tags:
@@ -313,7 +302,6 @@ Resources:
         Value: !Sub "${AWS::StackName}-dbsubnet03"
   
   # Route TableAssociation
-
   PublicSubnet01RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -459,15 +447,6 @@ Resources:
       ToPort: 443
 
   # Create AWS RDS Aurora Database
-  SecretsManagerAdmin:
-    Type: 'AWS::SecretsManager::Secret'
-    Properties:
-      Description: AWS RDS admin credentials
-      GenerateSecretString:
-        SecretStringTemplate: '{"username": "atc"}'
-        GenerateStringKey: password
-        PasswordLength: 32
-        ExcludeCharacters: '"@/\'
 
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
@@ -481,35 +460,29 @@ Resources:
     DependsOn: 
       [DBSubnet01, DBSubnet02, DBSubnet03]
 
-  AuroraDatabase:
-    Type: 'AWS::RDS::DBInstance'
+  DatabaseCluster:
+    Type: AWS::RDS::DBCluster
     Properties:
-      DBName: !Sub "${AWS::StackName}"
-      DBSubnetGroupName: !Ref DBSubnetGroup
-      DBInstanceClass: !Ref DBInstanceClass
-      AllocatedStorage: !Ref DBAllocatedStorage
-      MultiAZ: true
       Engine: aurora-postgresql
       EngineVersion: !Ref DBVersion
-      MasterUsername: !Sub '{{resolve:secretsmanager:${SecretsManagerAdmin}::username}}'
-      MasterUserPassword: !Sub '{{resolve:secretsmanager:${SecretsManagerAdmin}::password}}'
-      EnableCloudwatchLogsExports:
-        - postgresql
-      RestoreType: full-copy
-      StorageEncrypted: true
+      MasterUsername: 'atc'
+      MasterUserPassword: 'atc12312312412'
       BackupRetentionPeriod: 30
-    DependsOn: 
-      [DBSubnetGroup, DBSubnet01, DBSubnet02, DBSubnet03, NatGateway]
-
-  SecretRDSInstanceAttachment:
-    Type: 'AWS::SecretsManager::SecretTargetAttachment'
-    Properties:
-      SecretId: !Ref SecretsManagerAdmin
-      TargetId: !Ref AuroraDatabase
-      TargetType: 'AWS::RDS::DBInstance'
+      PreferredBackupWindow: 01:00-02:00
+      PreferredMaintenanceWindow: mon:03:00-mon:04:00
+      DBSubnetGroupName: !Ref 'DBSubnetGroup'
     DependsOn:
-      [SecretsManagerAdmin, AuroraDatabase]
+      [DBSubnet01, DBSubnet02, DBSubnet03]
 
+  DatabasePrimaryInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: aurora-postgresql
+      EngineVersion: !Ref DBVersion
+      DBClusterIdentifier: !Ref 'DatabaseCluster'
+      DBInstanceClass: db.r5.large
+      DBSubnetGroupName: !Ref 'DBSubnetGroup'
+    DependsOn: [DBSubnet01, DBSubnet02, DBSubnet03]
 
   # AWS EKS Roles and Profiles
   EKSIAMRole:
@@ -543,14 +516,14 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
         - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
-        - arn:aws:iam::aws:policy/AmazonEKSServicePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
 
   # Create Kubernetes and NodeGroup
   EKSCluster:
     Type: AWS::EKS::Cluster
     Properties:
       Name: !Sub "${AWS::StackName}-cluster"
-      RoleArn: !GetAtt 'EKSIAMRole.Arn'
+      RoleArn: !GetAtt EKSIAMRole.Arn
       ResourcesVpcConfig:
         SecurityGroupIds:
           - !Ref ClusterControlPlaneSecurityGroup
@@ -559,8 +532,6 @@ Resources:
           - !Ref PrivateSubnet02
           - !Ref PrivateSubnet03
         EndpointPrivateAccess: true
-        EndpointPublicAccess: true
-        PublicAccessCidrs: [ "0.0.0.0/0" ]
       Version: !Ref ClusterVersion
       Logging:
         ClusterLogging:
@@ -573,9 +544,8 @@ Resources:
   EKSNodegroup:
     Type: "AWS::EKS::Nodegroup"
     Properties:
-      ClusterName: !Sub "${AWS::StackName}-cluster-ng"
-      NodeRole: !GetAtt 'AmazonEKSNodeRole.Arn'
-
+      ClusterName: !Sub "${AWS::StackName}-cluster"
+      NodeRole: !GetAtt AmazonEKSNodeRole.Arn
       DiskSize: !Ref ClusterNodeStorage
       InstanceTypes:
       - !Ref ClusterNodesType
@@ -589,7 +559,6 @@ Resources:
         - !Ref PrivateSubnet03
     DependsOn:
       [ EKSCluster, NodeSecurityGroup, EKSIAMRole, AmazonEKSNodeRole]
-
 
 Outputs:
   SubnetIds:
@@ -617,10 +586,16 @@ Outputs:
     Value: !Ref VPC
   EksArn:
     Description: EKS Kubernertes ARN
-    Value: !GetAtt "EKSCluster.Arn"
+    Value: !GetAtt EKSCluster.Arn
+  EksApi:
+    Description: EKS Kubernertes API Endpoint
+    Value: !GetAtt EKSCluster.Endpoint
   NodeGroup:
     Description: EKS NodeGroup
-    Value: !Ref EKSNodegroup
-  Password:
-    Description: Database Password
-    Value: !Sub '{{resolve:secretsmanager:${SecretsManagerAdmin}::password}}'
+    Value: !GetAtt EKSNodegroup.Arn
+  DatabaseEndpoint:
+    Description: AWS RDS Aurora
+    Value: !GetAtt DatabaseCluster.Endpoint.Address
+  ReadDatabaseEndpoint:
+    Description: AWS RDS Aurora
+    Value: !GetAtt DatabaseCluster.ReadEndpoint.Address
