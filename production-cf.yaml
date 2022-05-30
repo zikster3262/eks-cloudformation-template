@@ -55,6 +55,10 @@ Parameters:
     Type: String
     Default: v1.22.6-eksbuild.1
     Description: AWS EKS Kube Proxy Addon Version
+  CNIVersion:
+    Default: v1.11.0-eksbuild.1
+    Type: String
+    Description: AWS EKS Kube ENI Addon Version
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -560,6 +564,8 @@ Resources:
     Type: AWS::EKS::Addon
     Properties:
       AddonName: vpc-cni
+      AddonVersion: !Ref CNIVersion
+      ResolveConflicts: OVERWRITE
       ClusterName: !Sub '${AWS::StackName}-cluster'
     DependsOn:
       [ EKSCluster, EKSNodegroup]
@@ -643,3 +649,5 @@ Outputs:
   ReadDatabaseEndpoint:
     Description: AWS RDS Aurora
     Value: !GetAtt DatabaseCluster.ReadEndpoint.Address
+  AccountID:
+    Value: !Sub "${AWS::AccountId}"
