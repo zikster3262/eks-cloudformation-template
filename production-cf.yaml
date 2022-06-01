@@ -28,6 +28,10 @@ Parameters:
     MaxLength: '41'
     AllowedPattern: '[a-zA-Z0-9]*'
     ConstraintDescription: must contain only alphanumeric characters.
+  DBPort:
+    Type: String
+    Default: 3306
+    Description: AWS Aurora Database Port
   ClusterNodesNumber:
     Type: Number
     Default: 3
@@ -47,6 +51,11 @@ Parameters:
     MinValue: '20'
     MaxValue: '65536'
     ConstraintDescription: must be between 20 and 65536 GiB.
+  ClusterPublicAccess:
+    AllowedValues: [true,false]
+    Default: false
+    Description: Enable or Disable Cluster API access from the Public Network
+    Type: String
   CoreDnsVersion:
     Type: String
     Default: v1.8.7-eksbuild.1
@@ -466,6 +475,41 @@ Resources:
       SourceSecurityGroupId: !Ref ClusterControlPlaneSecurityGroup
       ToPort: 443
 
+  # Database Security Group:
+  DBSecGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security group for AWS RDS Database
+      Tags:
+        - Key: !Sub kubernetes.io/cluster/${AWS::StackName}-cluster
+          Value: owned
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-db-sg'
+      VpcId: !Ref VPC
+
+  DB1SecIngres:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      Description: Allow Nodes to communicate with DB
+      FromPort: !Ref DBPort
+      GroupId: !Ref DBSecGroup
+      IpProtocol: 'tcp'
+      SourceSecurityGroupId: !Ref NodeSecurityGroup
+      ToPort: !Ref DBPort
+    DependsOn: [DBSecGroup]
+  
+  DB2SecIngres:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      Description: Allow Nodes to communicate with DB
+      FromPort: !Ref DBPort
+      GroupId: !Ref DBSecGroup
+      IpProtocol: 'tcp'
+      CidrIp: !Ref VpcBlock
+      ToPort: !Ref DBPort
+    DependsOn: [DBSecGroup]
+
+
   # Create AWS RDS Aurora Database
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
@@ -490,6 +534,9 @@ Resources:
       PreferredBackupWindow: 01:00-02:00
       PreferredMaintenanceWindow: mon:03:00-mon:04:00
       DBSubnetGroupName: !Ref 'DBSubnetGroup'
+      VpcSecurityGroupIds:
+      - !Ref DBSecGroup
+      Port: !Ref DBPort
     DependsOn:
       [DBSubnet01, DBSubnet02, DBSubnet03]
 
@@ -551,6 +598,7 @@ Resources:
           - !Ref PrivateSubnet02
           - !Ref PrivateSubnet03
         EndpointPrivateAccess: true
+        EndpointPrivateAccess: !Ref ClusterPublicAccess
       Version: !Ref ClusterVersion
       Logging:
         ClusterLogging:
