@@ -54,12 +54,8 @@ Parameters:
 
   DBVersion:
     Type: String
-    Default: 13.5
+    Default: 13.6
     Description:  latest AWS Aurora version supported.
-    AllowedValues:
-      - 13.6
-      - 13.5
-      - 13.4
 
   DBPassword:
     NoEcho: 'true'
@@ -79,9 +75,6 @@ Parameters:
     Type: Number
     Default: 3
     Description: Cluster Node Group size
-    MinValue: 3
-    MaxValue: 40
-    ConstraintDescription: must be between 3 and 40.
     
   ClusterNodesType:
     Description: Default EC2 instance type for the node instances.
@@ -174,10 +167,7 @@ Parameters:
   ClusterVersion:
     Type: String
     Default: 1.22
-    Description:  choose AWS EKS cluster version
-    AllowedValues:
-    - 1.22
-    - 1.21
+    Description:  choose AWS EKS cluster version.
 
   ClusterNodeStorage:
     Default: 100
@@ -202,7 +192,7 @@ Parameters:
     Type: String
     Default: v1.22.6-eksbuild.1
     Description: AWS EKS Kube Proxy Addon Version
-
+    
   CNIVersion:
     Default: v1.11.0-eksbuild.1
     Type: String
@@ -219,7 +209,6 @@ Metadata:
           - DBUsername
           - DBAllocatedStorage
           - DBInstanceClass
-          - DBPort
           - DBName
           - DBVersion
           - ClusterNodesNumber
@@ -663,40 +652,75 @@ Resources:
     DependsOn: 
       [DBSubnet01, DBSubnet02, DBSubnet03]
 
-  DatabaseCluster:
-    Type: AWS::RDS::DBCluster
+  # DatabaseCluster:
+  #   Type: AWS::RDS::DBCluster
+  #   Properties:
+  #     DBClusterIdentifier: !Sub '${AWS::StackName}-db-cluster'
+  #     CopyTagsToSnapshot: true
+  #     Engine: aurora-postgresql
+  #     EngineVersion: !Ref DBVersion
+  #     DatabaseName: !Ref DBName
+  #     MasterUsername: 'atc'
+  #     MasterUserPassword: !Ref DBPassword
+  #     BackupRetentionPeriod: 30
+  #     PreferredBackupWindow: 01:00-02:00
+  #     PreferredMaintenanceWindow: mon:03:00-mon:04:00
+  #     StorageEncrypted: true
+  #     DBSubnetGroupName: !Ref 'DBSubnetGroup'
+  #     VpcSecurityGroupIds:
+  #     - !Ref DBSecGroup
+  #     Port: !Ref DBPort
+  #   DependsOn:
+  #     [DBSubnet01, DBSubnet02, DBSubnet03]
+
+  # DatabasePrimaryInstance:
+  #   Type: AWS::RDS::DBInstance
+  #   Properties:
+  #     Engine: aurora-postgresql
+  #     EngineVersion: !Ref DBVersion
+  #     DBClusterIdentifier: !Ref 'DatabaseCluster'
+  #     DBInstanceClass: !Ref DBInstanceClass
+  #     DBSubnetGroupName: !Ref 'DBSubnetGroup'
+  #     StorageEncrypted: true
+  #     CopyTagsToSnapshot: true
+  #     EnablePerformanceInsights: true
+  #     AutoMinorVersionUpgrade: true
+  #   DependsOn: [DBSubnet01, DBSubnet02, DBSubnet03]
+
+  DBClusterParameterGroup:
+    Type: 'AWS::RDS::DBClusterParameterGroup'
     Properties:
-      DBClusterIdentifier: !Sub '${AWS::StackName}-db-cluster'
-      CopyTagsToSnapshot: true
-      Engine: aurora-postgresql
-      EngineVersion: !Ref DBVersion
-      DatabaseName: !Ref DBName
-      MasterUsername: 'atc'
-      MasterUserPassword: !Ref DBPassword
+      Description: !Ref 'AWS::StackName'
+      Family: aurora-postgresql10
+      Parameters:
+        client_encoding: 'UTF8'
+
+  DBCluster:
+    DeletionPolicy: Snapshot # default
+    UpdateReplacePolicy: Snapshot
+    Type: 'AWS::RDS::DBCluster'
+    Properties:
       BackupRetentionPeriod: 30
-      PreferredBackupWindow: 01:00-02:00
-      PreferredMaintenanceWindow: mon:03:00-mon:04:00
-      StorageEncrypted: true
+      DatabaseName: postgres
       DBSubnetGroupName: !Ref 'DBSubnetGroup'
+      DBClusterParameterGroupName: !Ref DBClusterParameterGroup
+      EnableHttpEndpoint: false
+      Engine: aurora-postgresql
+      EngineMode: serverless
+      EngineVersion: !Ref DBVersion
+      MasterUsername: atc
+      MasterUserPassword: !Ref DBPassword
+      ScalingConfiguration:
+        AutoPause: true
+        MaxCapacity: 2
+        MinCapacity: 4
+        SecondsUntilAutoPause: 1800
+      StorageEncrypted: true
       VpcSecurityGroupIds:
       - !Ref DBSecGroup
       Port: !Ref DBPort
     DependsOn:
       [DBSubnet01, DBSubnet02, DBSubnet03]
-
-  DatabasePrimaryInstance:
-    Type: AWS::RDS::DBInstance
-    Properties:
-      Engine: aurora-postgresql
-      EngineVersion: !Ref DBVersion
-      DBClusterIdentifier: !Ref 'DatabaseCluster'
-      DBInstanceClass: !Ref DBInstanceClass
-      DBSubnetGroupName: !Ref 'DBSubnetGroup'
-      StorageEncrypted: true
-      CopyTagsToSnapshot: true
-      EnablePerformanceInsights: true
-      AutoMinorVersionUpgrade: true
-    DependsOn: [DBSubnet01, DBSubnet02, DBSubnet03]
 
   # AWS EKS Roles and Profiles
   EKSIAMRole:
@@ -839,11 +863,11 @@ Outputs:
   NodeGroup:
     Description: EKS NodeGroup
     Value: !GetAtt EKSNodegroup.Arn
-  DatabaseEndpoint:
-    Description: AWS RDS Aurora
-    Value: !GetAtt DatabaseCluster.Endpoint.Address
-  ReadDatabaseEndpoint:
-    Description: AWS RDS Aurora
-    Value: !GetAtt DatabaseCluster.ReadEndpoint.Address
+  # DatabaseEndpoint:
+  #   Description: AWS RDS Aurora
+  #   Value: !GetAtt DatabaseCluster.Endpoint.Address
+  # ReadDatabaseEndpoint:
+  #   Description: AWS RDS Aurora
+  #   Value: !GetAtt DatabaseCluster.ReadEndpoint.Address
   AccountID:
     Value: !Sub "${AWS::AccountId}"
