@@ -5,7 +5,7 @@ Parameters:
     Default: 10.0.0.0/21
     Description: The CIDR range for the VPC. This should be a valid private (RFC 1918) CIDR range.
   DBInstanceClass:
-    Default: db.m5.large
+    Default: db.r5.large
     Description: DB instance class
     Type: String
     ConstraintDescription: Must select a valid DB instance type.
@@ -25,12 +25,12 @@ Parameters:
     Description: Password Aurora Postgres Database access
     Type: String
     MinLength: '8'
-    MaxLength: '41'
+    MaxLength: '128'
     AllowedPattern: '[a-zA-Z0-9]*'
     ConstraintDescription: must contain only alphanumeric characters.
   DBPort:
     Type: String
-    Default: 3306
+    Default: 5432
     Description: AWS Aurora Database Port
   ClusterNodesNumber:
     Type: Number
@@ -46,7 +46,7 @@ Parameters:
     Description:  choose AWS EKS cluster version.
   ClusterNodeStorage:
     Default: 100
-    Description: The size of the database (GiB)
+    Description: The size of volume attached to Kubernetes Node
     Type: Number
     MinValue: '20'
     MaxValue: '65536'
@@ -487,7 +487,7 @@ Resources:
           Value: !Sub '${AWS::StackName}-db-sg'
       VpcId: !Ref VPC
 
-  DB1SecIngres:
+  DB1SecIngress:
     Type: 'AWS::EC2::SecurityGroupIngress'
     Properties:
       Description: Allow Nodes to communicate with DB
@@ -498,7 +498,7 @@ Resources:
       ToPort: !Ref DBPort
     DependsOn: [DBSecGroup]
   
-  DB2SecIngres:
+  DB2SecIngress:
     Type: 'AWS::EC2::SecurityGroupIngress'
     Properties:
       Description: Allow Nodes to communicate with DB
@@ -546,7 +546,7 @@ Resources:
       Engine: aurora-postgresql
       EngineVersion: !Ref DBVersion
       DBClusterIdentifier: !Ref 'DatabaseCluster'
-      DBInstanceClass: db.r5.large
+      DBInstanceClass: !Ref DBInstanceClass
       DBSubnetGroupName: !Ref 'DBSubnetGroup'
     DependsOn: [DBSubnet01, DBSubnet02, DBSubnet03]
 
